@@ -1,0 +1,520 @@
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+
+.visualizer-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+#renderCanvas {
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    display: block;
+}
+
+.ui-overlay {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    pointer-events: none;
+    /* Let clicks pass through to canvas */
+    color: white;
+    text-shadow: 1px 1px 2px black;
+}
+
+.ui-overlay * {
+    pointer-events: auto;
+    /* Re-enable clicks for UI elements */
+}
+
+.controls-panel {
+    background: rgba(20, 20, 20, 0.85);
+    padding: 20px;
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    margin-top: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    width: 250px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.control-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #eee;
+    font-size: 14px;
+}
+
+.section-title {
+    color: #88ccff;
+    font-weight: bold;
+    margin-top: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 4px;
+    text-transform: uppercase;
+    font-size: 12px;
+}
+
+.file-upload-btn {
+    background: #007bff;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    width: 100%;
+    font-weight: 500;
+}
+
+.file-upload-btn input {
+    display: none;
+}
+
+.file-upload-btn:hover {
+    background: #0069d9;
+}
+
+input[type="range"] {
+    width: 60%;
+}
+
+.mini-select {
+    background: #333;
+    color: white;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 12px;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+.guide-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* pointer-events: none;  <-- REMOVED to allow interaction with toolbar children */
+    z-index: 10;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    /* Dim outside */
+}
+
+.guide-border {
+    width: 100%;
+    height: 100%;
+    border: 2px solid white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    position: relative;
+}
+
+/* Optional: rule of thirds grid */
+.guide-border::before,
+.guide-border::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.guide-border::before {
+    top: 33.33%;
+    bottom: 33.33%;
+    left: 0;
+    right: 0;
+}
+
+.guide-border::after {
+    left: 33.33%;
+    right: 33.33%;
+    top: 0;
+    bottom: 0;
+}
+
+.mini-btn {
+    background: #444;
+    color: white;
+    border: 1px solid #555;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.mini-btn:hover {
+    background: #555;
+}
+
+.studio-toolbar {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    margin-left: 10px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 10px;
+    width: 200px;
+    pointer-events: auto;
+    /* Enable clicks */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.rec-btn {
+    background: #e74c3c;
+    color: white;
+    font-weight: bold;
+    border: none;
+    padding: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.rec-btn:hover {
+    background: #c0392b;
+}
+
+.rec-dot {
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 50%;
+}
+
+.rec-btn.recording .rec-dot {
+    animation: blink 1s infinite;
+    background: #fff;
+}
+
+@keyframes blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+/* FX STUDIO MODAL */
+.fx-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+.fx-modal {
+    width: 600px;
+    height: 450px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.fx-header {
+    background: #252525;
+    padding: 10px 15px;
+    font-weight: bold;
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+}
+
+.fx-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.fx-sidebar {
+    width: 160px;
+    background: #222;
+    border-right: 1px solid #333;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.fx-main {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    background: #1e1e1e;
+}
+
+.fx-tab-btn {
+    background: transparent;
+    border: none;
+    color: #aaa;
+    text-align: left;
+    padding: 8px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.fx-tab-btn.active {
+    background: #333;
+    color: white;
+    font-weight: bold;
+}
+
+.fx-preset-card {
+    background: #333;
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+    cursor: pointer;
+    border: 1px solid #444;
+    margin-bottom: 4px;
+}
+
+.fx-preset-card:hover {
+    border-color: #666;
+}
+
+.fx-control-group {
+    background: #252525;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    margin-bottom: 10px;
+}
+
+.fx-label {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+/* ANIMATIONS */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.1);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes flash {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+}
+
+@keyframes rainbow {
+    0% {
+        filter: hue-rotate(0deg);
+    }
+
+    100% {
+        filter: hue-rotate(360deg);
+    }
+}
+
+.anim-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: max-content;
+    height: max-content;
+}
+
+
+/* RESIZE HANDLES */
+.resize-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: white;
+    border: 1px solid #007bff;
+    border-radius: 50%;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+.resize-handle.tl {
+    top: -5px;
+    left: -5px;
+    cursor: nwse-resize;
+}
+
+.resize-handle.tr {
+    top: -5px;
+    right: -5px;
+    cursor: nesw-resize;
+}
+
+.resize-handle.bl {
+    bottom: -5px;
+    left: -5px;
+    cursor: nesw-resize;
+}
+
+.resize-handle.br {
+    bottom: -5px;
+    right: -5px;
+    cursor: nwse-resize;
+}
+
+
+/* ROTATION HANDLE */
+.rotate-handle {
+    position: absolute;
+    top: -25px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 10px;
+    background: white;
+    border: 1px solid #007bff;
+    border-radius: 50%;
+    cursor: grab;
+    z-index: 100;
+}
+
+.rotate-handle:active {
+    cursor: grabbing;
+    background: #007bff;
+}
+
+/* Stick connecting handle to box */
+.rotate-handle::after {
+    content: '';
+    position: absolute;
+    width: 1px;
+    height: 15px;
+    background: #007bff;
+    left: 50%;
+    bottom: -15px;
+    /* Connects to top of box (approx) */
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+/* CUSTOM SVG OVERRIDES FOR PREVIEW */
+.svg-content-wrapper svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.svg-content-wrapper svg * {
+    vector-effect: non-scaling-stroke;
+    /* Force inherit from wrapper div which has style='color:...' */
+    fill: currentColor;
+    stroke: inherit;
+    /* Wrapper has stroke color set? No, wrapper has style.stroke. */
+}
+
+/* Specific overrides if SVG has hardcoded styles */
+.svg-content-wrapper svg path,
+.svg-content-wrapper svg circle,
+.svg-content-wrapper svg rect,
+.svg-content-wrapper svg polygon {
+    fill: currentColor !important;
+    stroke: inherit !important;
+}
+
+
+/* PALETTE STUDIO */
+.palette-panel {
+    /* Base styles inherited from controls-panel but we overwrite width */
+    width: 280px !important;
+    background: rgba(10, 10, 10, 0.95);
+}
+
+.palette-preview-container {
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect width="5" height="5" fill="%23222"/><rect x="5" y="5" width="5" height="5" fill="%23222"/></svg>') #333;
+}
+
+.palette-image.picking {
+    cursor: crosshair;
+}
+
+.palette-grid {
+    background: #1a1a1a;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #333;
+}
+
+.color-swatch {
+    position: relative;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+}
+
+.color-swatch:hover {
+    transform: scale(1.1);
+    z-index: 10;
+    border-color: white !important;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.color-swatch:active {
+    transform: scale(0.95);
+}

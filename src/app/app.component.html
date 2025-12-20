@@ -1,0 +1,722 @@
+<div class="visualizer-container">
+  <canvas #renderCanvas id="renderCanvas" (contextmenu)="$event.preventDefault()"></canvas>
+  <div *ngIf="showGuide" class="guide-overlay" [ngStyle]="guideStyle">
+    <div class="guide-border">
+      <!-- Overlays Render -->
+      <ng-container *ngFor="let layer of activeOverlays; let i = index">
+        <div *ngIf="layer.visible" [style.position]="'absolute'" [style.left.%]="layer.x * 100"
+          [style.top.%]="layer.y * 100"
+          [style.transform]="'translate(-50%, -50%) rotate(' + (layer.rotation || 0) + 'deg)'" [style.cursor]="'move'"
+          (mousedown)="startDrag(layer.id, $event)"
+          [style.border]="selectedLayerId === layer.id ? '1px dashed yellow' : 'none'" [style.z-index]="10 + i"
+          style="pointer-events: auto;">
+          <!-- Enable clicking on overlays -->
+
+          <!-- Anim Wrapper -->
+          <div class="anim-wrapper" [style.animation]="getLayerAnimation(layer)">
+
+            <!-- Layer Box (Sizing & Handles) -->
+            <div class="layer-box"
+              style="position: relative; display: inline-flex; justify-content: center; align-items: center;"
+              [style.width.px]="(layer.type !== 'text') ? (guideDimensions.w * (layer.width || 0.2)) : null"
+              [style.height.px]="(layer.type !== 'text' && layer.type !== 'image' && layer.type !== 'frame' && layer.type !== 'custom-svg') ? (guideDimensions.h * (layer.height || layer.width || 0.2)) : ((layer.type === 'image' || layer.type === 'frame' || layer.type === 'custom-svg') ? null : null)">
+
+              <!-- Resize Handles (Only if selected) -->
+              <ng-container *ngIf="selectedLayerId === layer.id">
+                <div class="resize-handle tl" (mousedown)="startResize(layer.id, 'tl', $event)"></div>
+                <div class="resize-handle tr" (mousedown)="startResize(layer.id, 'tr', $event)"></div>
+                <div class="resize-handle bl" (mousedown)="startResize(layer.id, 'bl', $event)"></div>
+                <div class="resize-handle br" (mousedown)="startResize(layer.id, 'br', $event)"></div>
+                <!-- ROTATION HANDLE -->
+                <div class="rotate-handle" (mousedown)="startRotate(layer.id, $event)"></div>
+              </ng-container>
+
+              <!-- Rect Type -->
+              <div *ngIf="layer.type === 'rect'" style="width: 100%; height: 100%;"
+                [style.background-color]="layer.color"
+                [style.border]="(layer.strokeWidth || 0) + 'px solid ' + (layer.strokeColor || 'black')"
+                [style.box-shadow]="(layer.shadowBlur) ? ((layer.shadowOffsetX||0)+'px '+(layer.shadowOffsetY||0)+'px '+layer.shadowBlur+'px '+layer.shadowColor) : 'none'">
+              </div>
+
+              <!-- Circle Type -->
+              <div *ngIf="layer.type === 'circle'" style="width: 100%; height: 100%; border-radius:50%;"
+                [style.background-color]="layer.color"
+                [style.border]="(layer.strokeWidth || 0) + 'px solid ' + (layer.strokeColor || 'black')"
+                [style.box-shadow]="(layer.shadowBlur) ? ((layer.shadowOffsetX||0)+'px '+(layer.shadowOffsetY||0)+'px '+layer.shadowBlur+'px '+layer.shadowColor) : 'none'">
+              </div>
+
+              <!-- Triangle Type -->
+              <svg *ngIf="layer.type === 'triangle'" style="width: 100%; height: 100%; overflow: visible;"
+                viewBox="0 0 100 100"
+                [style.filter]="(layer.shadowBlur) ? ('drop-shadow('+(layer.shadowOffsetX||0)+'px '+(layer.shadowOffsetY||0)+'px '+layer.shadowBlur+'px '+layer.shadowColor+')') : 'none'">
+                <polygon points="50,0 0,100 100,100" [attr.fill]="layer.color"
+                  [attr.stroke]="layer.strokeColor || 'black'" [style.stroke-width.px]="layer.strokeWidth || 0"
+                  vector-effect="non-scaling-stroke" />
+              </svg>
+
+              <!-- Star Type -->
+              <svg *ngIf="layer.type === 'star'" style="width: 100%; height: 100%; overflow: visible;"
+                viewBox="0 0 100 100"
+                [style.filter]="(layer.shadowBlur) ? ('drop-shadow('+(layer.shadowOffsetX||0)+'px '+(layer.shadowOffsetY||0)+'px '+layer.shadowBlur+'px '+layer.shadowColor+')') : 'none'">
+                <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" [attr.fill]="layer.color"
+                  [attr.stroke]="layer.strokeColor || 'black'" [style.stroke-width.px]="layer.strokeWidth || 0"
+                  vector-effect="non-scaling-stroke" />
+              </svg>
+
+              <!-- Custom SVG Type -->
+              <div *ngIf="layer.type === 'custom-svg'" class="svg-content-wrapper" [innerHTML]="getTrustedSvg(layer)"
+                [style.width.px]="guideDimensions.w * (layer.width || 0.2)" [style.color]="layer.color"
+                [style.fill]="layer.color" [style.stroke]="layer.strokeColor"
+                [style.stroke-width.px]="layer.strokeWidth" style="display:block; pointer-events: none;">
+              </div>
+
+              <!-- Image Type -->
+              <img *ngIf="layer.type === 'image' || layer.type === 'frame'" [src]="layer.src"
+                [style.width.px]="guideDimensions.w * (layer.width || 0.2)"
+                style="display:block; pointer-events: none;">
+
+              <!-- Text Type -->
+              <div *ngIf="layer.type === 'text'" [style.font-family]="layer.fontFamily" [style.color]="layer.color"
+                [style.font-size.px]="guideDimensions.h * (layer.width || 0.1)"
+                [style.text-shadow]="(layer.shadowBlur) ? ('0 0 ' + layer.shadowBlur + 'px ' + layer.shadowColor) : 'none'"
+                [style.-webkit-text-stroke]="(layer.strokeWidth) ? (layer.strokeWidth + 'px ' + layer.strokeColor) : 'none'"
+                style="white-space: nowrap; font-weight: bold; pointer-events: none;">
+                {{layer.text}}
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </ng-container>
+    </div>
+
+    <!-- FLOATING STUDIO TOOLBAR -->
+    <div class="studio-toolbar">
+      <label style="color:#aaa; font-size:10px; font-weight:bold; letter-spacing:1px; text-transform:uppercase;">Cam
+        Studio</label>
+
+      <button (click)="onToggleRecord()" class="rec-btn" [class.recording]="isRecording">
+        <span class="rec-dot"></span> {{ isRecording ? 'STOP' : 'REC' }}
+      </button>
+
+      <div style="width:100%; height:1px; background:#444; margin: 4px 0;"></div>
+
+      <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:4px;">
+        <div style="display:flex; gap:4px;">
+          <button (click)="addTextLayer()" class="mini-btn" style="flex:1;">T+</button>
+          <label class="mini-btn" style="flex:1; text-align:center; cursor:pointer;" title="Import Image">
+            IMG <input type="file" (change)="addImageLayer($event)" style="display:none;" accept="image/*">
+          </label>
+          <label class="mini-btn" style="flex:1; text-align:center; cursor:pointer;" title="Import SVG Shape">
+            SVG <input type="file" (change)="onSvgUpload($event)" style="display:none;" accept=".svg">
+          </label>
+        </div>
+
+        <!-- SHAPE MENU DROPDOWN -->
+        <div style="position:relative; width:100%;">
+          <button (click)="toggleShapeMenu()" class="mini-btn"
+            style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+            <span>Shapes</span> <span style="font-size:10px;">▼</span>
+          </button>
+          <div *ngIf="showShapeMenu"
+            style="position:absolute; top:100%; left:0; right:0; background:#222; border:1px solid #444; z-index:100; display:flex; flex-direction:column;">
+            <button (click)="addShapeLayer('rect'); toggleShapeMenu()" class="mini-btn"
+              style="text-align:left; border:none; border-bottom:1px solid #333;">⬜ Rectangle</button>
+            <button (click)="addShapeLayer('circle'); toggleShapeMenu()" class="mini-btn"
+              style="text-align:left; border:none; border-bottom:1px solid #333;">⚪ Circle</button>
+            <button (click)="addShapeLayer('triangle'); toggleShapeMenu()" class="mini-btn"
+              style="text-align:left; border:none; border-bottom:1px solid #333;">🔺 Triangle</button>
+            <button (click)="addShapeLayer('star'); toggleShapeMenu()" class="mini-btn"
+              style="text-align:left; border:none;">⭐ Star</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:4px;">
+        <button (click)="applyPreset('neon')" class="mini-btn" style="flex:1; color:#00ffcc">Neon</button>
+        <button (click)="applyPreset('vintage')" class="mini-btn" style="flex:1; color:#ffccaa">Vint</button>
+      </div>
+
+      <!-- Selected Layer Properties -->
+      <div *ngIf="selectedLayer" style="border-top:1px solid #444; padding-top:8px; margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:11px;">
+          <span style="color:yellow;">Edit Layer</span>
+          <button (click)="deleteLayer(selectedLayer.id)"
+            style="color:red; background:none; border:none; cursor:pointer; font-weight:bold;">✕</button>
+        </div>
+
+        <div *ngIf="selectedLayer.type === 'text'" style="margin-bottom:4px;">
+          <input type="text" [(ngModel)]="selectedLayer.text"
+            style="width:100%; background:#111; border:1px solid #333; color:white; font-size:10px; padding:2px;">
+        </div>
+
+        <!-- Transform -->
+        <div
+          style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; font-size:10px; color:#aaa; margin-bottom:8px;">
+          <label>X <input type="number" step="0.05" [(ngModel)]="selectedLayer.x"
+              style="width:25px; background:#111; border:none; color:white;"></label>
+          <label>Y <input type="number" step="0.05" [(ngModel)]="selectedLayer.y"
+              style="width:25px; background:#111; border:none; color:white;"></label>
+          <label>Sz <input type="number" step="0.01" [(ngModel)]="selectedLayer.width"
+              style="width:25px; background:#111; border:none; color:white;"></label>
+          <label>Rot <input type="number" step="5" [(ngModel)]="selectedLayer.rotation"
+              style="width:25px; background:#111; border:none; color:white;"></label>
+        </div>
+
+        <!-- STYLE FX COMPACT -->
+        <div style="height:1px; background:#444; margin:4px 0 8px 0;"></div>
+        <div style="font-size:9px; color:#888; font-weight:bold; margin-bottom:4px; text-transform:uppercase;">
+          Appearance</div>
+
+        <!-- Fill -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-size:10px; color:#ccc;">Fill</span>
+          <input type="color" [(ngModel)]="selectedLayer.color"
+            style="width:20px; height:20px; border:none; background:none; padding:0;">
+          <select *ngIf="selectedLayer.type === 'text'" [(ngModel)]="selectedLayer.fontFamily" class="mini-select"
+            style="width:60px;">
+            <option value="Arial">Arial</option>
+            <option value="Verdana">Verdana</option>
+            <option value="Courier New">Courier</option>
+            <option value="Impact">Impact</option>
+          </select>
+        </div>
+
+        <!-- Stroke -->
+        <div style="margin-bottom:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10px; color:#ccc;">Stroke</span>
+            <input type="color" [(ngModel)]="selectedLayer.strokeColor"
+              style="width:20px; height:20px; border:none; background:none; padding:0;">
+          </div>
+          <input type="range" min="0" max="10" step="0.5" [(ngModel)]="selectedLayer.strokeWidth"
+            style="width:100%; height:4px;">
+        </div>
+
+        <!-- Shadow -->
+        <div style="margin-bottom:4px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10px; color:#ccc;">Shadow</span>
+            <input type="color" [(ngModel)]="selectedLayer.shadowColor"
+              style="width:20px; height:20px; border:none; background:none; padding:0;">
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:x; row-gap:4px;">
+            <label style="font-size:9px; color:#aaa;">Blur <input type="range" min="0" max="30"
+                [(ngModel)]="selectedLayer.shadowBlur" style="width:40px; vertical-align:middle;"></label>
+            <label style="font-size:9px; color:#aaa;">OffX <input type="range" min="-20" max="20"
+                [(ngModel)]="selectedLayer.shadowOffsetX" style="width:40px; vertical-align:middle;"></label>
+            <label style="font-size:9px; color:#aaa;">OffY <input type="range" min="-20" max="20"
+                [(ngModel)]="selectedLayer.shadowOffsetY" style="width:40px; vertical-align:middle;"></label>
+          </div>
+        </div>
+
+        <!-- Animations -->
+        <div style="height:1px; background:#444; margin:4px 0 8px 0;"></div>
+        <div style="font-size:9px; color:#888; font-weight:bold; margin-bottom:4px; text-transform:uppercase;">
+          Animations</div>
+
+        <div style="display:grid; grid-template-columns: 1fr; gap:4px;">
+          <!-- Pulse -->
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <label style="font-size:10px; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" [checked]="selectedLayer.animPulse"
+                (change)="selectedLayer.animPulse = ($any($event.target).checked ? 1 : undefined)"> Pulse
+            </label>
+            <input *ngIf="selectedLayer.animPulse" type="range" min="0.1" max="5" step="0.1"
+              [(ngModel)]="selectedLayer.animPulse" style="width:60px;">
+          </div>
+
+          <!-- Spin -->
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <label style="font-size:10px; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" [checked]="selectedLayer.animSpin"
+                (change)="selectedLayer.animSpin = ($any($event.target).checked ? 1 : undefined)"> Spin
+            </label>
+            <input *ngIf="selectedLayer.animSpin" type="range" min="0.1" max="5" step="0.1"
+              [(ngModel)]="selectedLayer.animSpin" style="width:60px;">
+          </div>
+
+          <!-- Flash -->
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <label style="font-size:10px; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" [checked]="selectedLayer.animFlash"
+                (change)="selectedLayer.animFlash = ($any($event.target).checked ? 1 : undefined)"> Flash
+            </label>
+            <input *ngIf="selectedLayer.animFlash" type="range" min="0.1" max="5" step="0.1"
+              [(ngModel)]="selectedLayer.animFlash" style="width:60px;">
+          </div>
+
+          <!-- Rainbow -->
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <label style="font-size:10px; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" [checked]="selectedLayer.animRainbow"
+                (change)="selectedLayer.animRainbow = ($any($event.target).checked ? 1 : undefined)"> RGB
+            </label>
+            <input *ngIf="selectedLayer.animRainbow" type="range" min="0.1" max="5" step="0.1"
+              [(ngModel)]="selectedLayer.animRainbow" style="width:60px;">
+          </div>
+        </div>
+
+      </div>
+      <div *ngIf="!selectedLayer"
+        style="font-size:10px; color:#666; font-style:italic; text-align:center; margin-top:10px;">
+        Select item in frame
+      </div>
+    </div>
+  </div>
+
+
+  <div class="ui-overlay">
+
+    <!-- VIEW MODE PANEL -->
+    <div *ngIf="viewMode === 'view'" class="controls-panel">
+      <h1>STL Studio</h1>
+
+      <!-- Main Actions -->
+      <div class="control-group">
+        <label class="file-upload-btn" style="flex:1; text-align:center;">
+          Load Model
+          <input type="file" (change)="onFileSelected($event)" accept=".stl, .glb, .gltf">
+        </label>
+        <button (click)="enterPaintMode()"
+          style="flex:1; margin-left:10px; background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; font-weight:bold;">
+          Paint Studio
+        </button>
+      </div>
+
+      <!-- Scene Settings -->
+      <div class="section-title">Enviroment</div>
+      <div class="control-group">
+        <span class="label">Background:</span>
+        <input type="color" (input)="onBackgroundChange($event)" value="#1a1a1a">
+      </div>
+      <!-- LIGHTING STUDIO -->
+      <div class="control-group" style="flex-direction:column; align-items:flex-start;">
+        <div style="font-weight:bold; font-size:11px; margin-bottom:4px; color:#ddd; cursor:pointer;"
+          (click)="showLighting = !showLighting">
+          Lighting Studio {{showLighting ? '▼' : '►'}}
+        </div>
+        <div *ngIf="showLighting"
+          style="width:100%; display:flex; flex-direction:column; gap:6px; padding-left:5px; border-left:1px solid #444;">
+
+          <!-- Key Light -->
+          <div style="display:grid; grid-template-columns: 40px 1fr 20px; gap:4px; align-items:center;">
+            <span class="label" style="font-size:9px;">Key</span>
+            <input type="range" min="0" max="2" step="0.1" value="0.8" (input)="onLightIntensityChange('key', $event)">
+            <input type="color" value="#ffffff" (input)="onLightColorValChange('key', $event)"
+              style="width:15px; height:15px; border:none; padding:0;">
+          </div>
+          <!-- Fill Light -->
+          <div style="display:grid; grid-template-columns: 40px 1fr 20px; gap:4px; align-items:center;">
+            <span class="label" style="font-size:9px;">Fill</span>
+            <input type="range" min="0" max="2" step="0.1" value="0.4" (input)="onLightIntensityChange('fill', $event)">
+            <input type="color" value="#e3e3e3" (input)="onLightColorValChange('fill', $event)"
+              style="width:15px; height:15px; border:none; padding:0;">
+          </div>
+          <!-- Back Light -->
+          <div style="display:grid; grid-template-columns: 40px 1fr 20px; gap:4px; align-items:center;">
+            <span class="label" style="font-size:9px;">Rim</span>
+            <input type="range" min="0" max="2" step="0.1" value="0.6" (input)="onLightIntensityChange('back', $event)">
+            <input type="color" value="#ffffff" (input)="onLightColorValChange('back', $event)"
+              style="width:15px; height:15px; border:none; padding:0;">
+          </div>
+          <!-- Global -->
+          <div style="display:grid; grid-template-columns: 40px 1fr 20px; gap:4px; align-items:center;">
+            <span class="label" style="font-size:9px;">Amb</span>
+            <input type="range" min="0" max="1" step="0.1" value="0.5"
+              (input)="onLightIntensityChange('global', $event)">
+            <input type="color" value="#ffffff" (input)="onLightColorValChange('global', $event)"
+              style="width:15px; height:15px; border:none; padding:0;">
+          </div>
+        </div>
+      </div>
+
+      <!-- TURNTABLE CONTROLS -->
+      <div style="border: 1px solid #444; padding: 5px; border-radius: 4px; background: #2a2a2a;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+            <input type="checkbox" (change)="onTurntableToggle($event)" [checked]="turntableEnabled">
+            <strong>Turntable</strong>
+          </label>
+          <select *ngIf="turntableEnabled" (change)="onTurntableMaterialChange($event)" class="mini-select"
+            style="width: 70px;">
+            <option value="plastic">Plastic</option>
+            <option value="obsidian">Obsidian</option>
+            <option value="concrete">Concrete</option>
+            <option value="fabric">Fabric (Velvet)</option>
+            <option value="grid">Grid (Neon)</option>
+            <option value="terrain">Miniature Base (Nature)</option>
+          </select>
+        </div>
+
+        <div *ngIf="turntableEnabled" style="margin-top: 5px; display:flex; flex-direction:column; gap:5px;">
+          <!-- SPEED & PAUSE -->
+          <div style="display:flex; align-items:center; gap:5px;">
+            <label style="font-size:10px; display:flex; align-items:center; color:#eda;">
+              <input type="checkbox" (change)="onTurntablePauseToggle($event)" [checked]="turntablePaused"> Pause
+            </label>
+            <span style="font-size:10px; width:35px; text-align:right;">Speed:</span>
+            <input type="range" min="-0.05" max="0.05" step="0.001" (input)="onTurntableSpeedChange($event)"
+              value="0.01" style="flex:1;">
+          </div>
+          <!-- HEIGHT -->
+          <div style="display:flex; align-items:center;">
+            <span style="font-size:10px; width:50px;">Height:</span>
+            <input type="range" min="-5" max="5" step="0.01" (input)="onTurntableHeightChange($event)" value="0"
+              style="flex:1;">
+          </div>
+          <!-- OFFSETS -->
+          <!-- OFFSETS -->
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:2px;">
+            <div style="display:flex; align-items:center;">
+              <span style="font-size:10px; width:20px;">X:</span>
+              <input type="range" min="-5" max="5" step="0.01" [value]="turntableOffsetX"
+                (input)="onTurntableOffsetChange('x', $event)" style="flex:1;">
+            </div>
+            <div style="display:flex; align-items:center;">
+              <span style="font-size:10px; width:20px;">Y:</span>
+              <input type="range" min="-5" max="5" step="0.01" [value]="turntableOffsetY"
+                (input)="onTurntableOffsetChange('y', $event)" style="flex:1;">
+            </div>
+            <div style="display:flex; align-items:center;">
+              <span style="font-size:10px; width:20px;">Z:</span>
+              <input type="range" min="-5" max="5" step="0.01" [value]="turntableOffsetZ"
+                (input)="onTurntableOffsetChange('z', $event)" style="flex:1;">
+            </div>
+          </div>
+
+          <!-- CENTER BUTTON -->
+          <button (click)="onCenterModel()"
+            style="width:100%; background:#444; color:white; border:none; padding:4px; font-size:10px; cursor:pointer; border-radius:2px;">
+            Center Model
+          </button>
+        </div>
+      </div>
+
+      <!-- Tools -->
+      <div class="section-title">Tools</div>
+      <div class="control-group" style="justify-content: space-between;">
+        <label>
+          <input type="checkbox" (change)="onGizmosToggle($event)" [checked]="gizmosEnabled"> Gizmos
+        </label>
+        <button (click)="onResetCamera()"
+          style="background: #444; color: white; border: 1px solid #666; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;">Reset
+          View</button>
+      </div>
+      <div class="control-group" style="flex-direction: column; align-items: stretch; gap: 5px;">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+          <select [(ngModel)]="recordFormat" class="mini-select" style="width: 70px;">
+            <option value="webm">WebM</option>
+            <option value="gif">GIF</option>
+          </select>
+          <button (click)="onToggleRecord()" [style.background]="isRecording ? '#e74c3c' : '#444'"
+            style="flex:1; margin-left:5px; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; font-weight:bold;">
+            {{ isRecording ? 'STOP' : 'REC' }}
+          </button>
+        </div>
+
+        <div *ngIf="recordFormat === 'gif' && !isRecording"
+          style="display: flex; flex-direction: column; gap: 5px; font-size: 10px; color: #aaa; margin-top:2px;">
+
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="display:flex; align-items:center; gap:4px; color: white;">
+              <input type="checkbox" [(ngModel)]="showGuide"> Cam Studio
+            </label>
+            <select *ngIf="showGuide" [(ngModel)]="aspectRatio" class="mini-select" style="width:60px;">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </div>
+
+          <!-- STUDIO MOVED TO FLOATING PANEL -->
+
+          <div style="display:flex; gap: 5px; margin-top: 5px;">
+            <label style="flex:1; display:flex; flex-direction:column;">
+              FPS: {{gifFps}}
+              <input type="range" min="5" max="30" step="1" [(ngModel)]="gifFps">
+            </label>
+            <label style="flex:1; display:flex; flex-direction:column;">
+              Width: {{gifWidth}}px
+              <input type="range" min="200" max="800" step="50" [(ngModel)]="gifWidth">
+            </label>
+          </div>
+        </div>
+        <div *ngIf="isRecording"
+          style="text-align:center; font-size:11px; color:#e74c3c; animation: pulse 1.5s infinite;">
+          Recording {{recordFormat | uppercase}}...
+        </div>
+      </div>
+
+      <!-- Material -->
+      <div class="section-title">Material</div>
+      <div class="control-group">
+        <span class="label">Color:</span>
+        <input type="color" (input)="onMaterialColorChange($event)" [value]="materialColor">
+      </div>
+      <div class="control-group">
+        <span class="label">Metal:</span>
+        <input type="range" min="0" max="1" step="0.1" (input)="onMetallicChange($event)" [value]="metallic">
+      </div>
+      <div class="control-group">
+        <span class="label">Rough:</span>
+        <input type="range" min="0" max="1" step="0.1" (input)="onRoughnessChange($event)" [value]="roughness">
+      </div>
+
+      <!-- Particles -->
+      <div class="section-title">Effects</div>
+      <div class="control-group">
+        <label style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <span style="font-size: 11px;">BG Mode:</span>
+          <select (change)="onBackgroundEffectChange($event)" class="mini-select"
+            style="width: 110px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; padding: 2px;">
+            <option value="none" selected>None</option>
+            <option value="vignette">Studio Vignette</option>
+            <option value="grid">Neon Grid</option>
+            <option value="underwater">Underwater</option>
+            <option value="theater">Theater</option>
+            <option value="paparazzi">Paparazzi</option>
+            <option value="scifi">Sci-Fi Warp</option>
+            <option value="jungle">Jungle</option>
+            <option value="hell">Hell</option>
+            <option value="lollipop">Lollipop</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" (change)="onParticlesToggle($event)" [checked]="particlesEnabled"> Particles
+        </label>
+        <select (change)="onParticleModeChange($event)" class="mini-select">
+          <option value="stars">Stars</option>
+          <option value="snow">Snow</option>
+        </select>
+      </div>
+      <div *ngIf="particlesEnabled" style="margin-top: 8px; padding-left: 8px; border-left: 2px solid #555;">
+        <div class="control-group">
+          <span class="label" style="font-size: 10px;">Density:</span>
+          <input type="range" min="100" max="100000" step="100" (input)="onParticleDensityChange($event)" value="1000"
+            style="width: 50%;">
+        </div>
+        <div class="control-group">
+          <span class="label" style="font-size: 10px;">Speed:</span>
+          <input type="range" min="0.1" max="5" step="0.1" (input)="onParticleSpeedChange($event)" value="1"
+            style="width: 50%;">
+        </div>
+        <div class="control-group">
+          <span class="label" style="font-size: 10px;">Size:</span>
+          <input type="range" min="0.01" max="5.0" step="0.01" (input)="onParticleSizeChange($event)" value="0.1"
+            style="width: 50%;">
+        </div>
+        <div class="control-group">
+          <span class="label" style="font-size: 10px;">Life:</span>
+          <input type="range" min="1" max="10" step="0.5" (input)="onParticleLifeChange($event)" value="3"
+            style="width: 50%;">
+        </div>
+      </div>
+
+      <div class="section-title">Post-Processing</div>
+      <div class="control-group">
+        <label>
+          <input type="checkbox" (change)="onEffectToggle('dither', $event)"> Dither (Retro 1-bit)
+        </label>
+        <!-- Dither Options -->
+        <div *ngIf="ditherEnabled" style="margin-top:5px; padding-left:10px; border-left:2px solid #555; width:90%;">
+          <div class="control-group" style="margin-bottom:2px;">
+            <span class="label" style="font-size:10px;">Palette:</span>
+            <select (change)="onDitherPaletteChange($event)" class="mini-select" style="flex:1;">
+              <option value="bw">Classic B&W</option>
+              <option value="gameboy">Gameboy (4 Gray)</option>
+              <option value="apple2">Apple II (16 Colors)</option>
+              <option value="cga">CGA (16 Colors)</option>
+              <option value="cyber">Cyberpunk (8 Colors)</option>
+              <option value="sepia">Sepia (6 Tones)</option>
+              <option value="apple2_g">Apple II (Green)</option>
+              <option value="apple2_ob">Apple II (Orange/Blue)</option>
+              <option value="apple2_gm">Apple II (Green/Magenta)</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <span class="label" style="font-size:10px;">Pixel:</span>
+            <input type="range" min="1" max="8" step="1" value="1" (input)="onDitherPixelChange($event)"
+              style="flex:1;">
+          </div>
+        </div>
+      </div>
+
+      <!-- 3D Text Studio -->
+      <div class="section-title">3D Text</div>
+      <div class="control-group" style="flex-direction: column; align-items: stretch;">
+        <input type="text" [(ngModel)]="newText" placeholder="Enter text..."
+          style="width:100%; margin-bottom:5px; padding:4px; border-radius:4px; border:1px solid #555; background:#333; color:white;">
+
+        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+          <input type="color" [(ngModel)]="newTextColor" style="flex:1; height:25px; margin-right:5px;">
+          <input type="range" [(ngModel)]="newTextDepth" min="0.1" max="5.0" step="0.1" style="flex:2;">
+        </div>
+
+        <button (click)="addText()"
+          style="background:#444; color:white; padding:5px; border-radius:4px; border:none; cursor:pointer;">
+          Add 3D Text (Geometry)
+        </button>
+      </div>
+
+      <!-- Quality -->
+      <div class="section-title">Quality</div>
+      <div class="control-group">
+        <select (change)="onQualityChange($event)">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+
+    </div>
+
+    <!-- PAINT MODE PANEL -->
+    <div *ngIf="viewMode === 'paint'" class="controls-panel" style="border-left: 4px solid #e74c3c;">
+      <h1 style="color: #e74c3c;">Paint Studio</h1>
+
+      <button (click)="exitPaintMode()"
+        style="width:100%; background:#444; color:white; padding:10px; border:none; border-radius:4px; cursor:pointer; margin-bottom: 20px;">
+        < Back to Viewer </button>
+
+          <div class="control-group" style="flex-direction: column; align-items: flex-start;">
+            <div style="display:flex; width:100%; align-items:center; margin-bottom:5px;">
+              <span class="label">Color:</span>
+              <input type="color" [value]="currentPaintColor" (input)="onPaintColorChange($event)"
+                (change)="addToPalette($event)" style="height: 30px; flex:1;">
+            </div>
+
+            <!-- Palette Swatches -->
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; width: 100%;">
+              <div *ngFor="let c of recentColors" (click)="selectColor(c)" [style.background]="c"
+                style="width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid #555; box-shadow: 0 1px 2px rgba(0,0,0,0.3);">
+              </div>
+            </div>
+          </div>
+
+          <div class="section-title">Tools</div>
+          <div class="control-group" style="flex-direction: column; align-items: stretch;">
+            <div
+              style="display:flex; width:100%; gap:5px; background: #333; padding: 4px; border-radius: 4px; border: 1px solid #555;">
+              <button (click)="onPaintToolChange('brush')"
+                [style.background]="paintTool === 'brush' ? '#555' : 'transparent'"
+                [style.color]="paintTool === 'brush' ? 'white' : '#aaa'"
+                [style.border]="paintTool === 'brush' ? '1px solid #777' : 'none'" title="Keyboard Shortcut: B"
+                style="flex:1; padding:8px; border-radius:4px; cursor:pointer; font-size:12px; transition: all 0.2s;">
+                Brush
+              </button>
+              <button (click)="onPaintToolChange('bucket')"
+                [style.background]="paintTool === 'bucket' ? '#555' : 'transparent'"
+                [style.color]="paintTool === 'bucket' ? 'white' : '#aaa'"
+                [style.border]="paintTool === 'bucket' ? '1px solid #777' : 'none'" title="Keyboard Shortcut: F"
+                style="flex:1; padding:8px; border-radius:4px; cursor:pointer; font-size:12px; transition: all 0.2s;">
+                Bucket
+              </button>
+              <button (click)="onPaintToolChange('move')"
+                [style.background]="paintTool === 'move' ? '#3498db' : 'transparent'"
+                [style.color]="paintTool === 'move' ? 'white' : '#aaa'"
+                [style.border]="paintTool === 'move' ? '1px solid #2980b9' : 'none'" title="Keyboard Shortcut: M"
+                style="flex:1; padding:8px; border-radius:4px; cursor:pointer; font-size:12px; transition: all 0.2s;">
+                Move
+              </button>
+            </div>
+            <div style="font-size: 10px; color: #888; margin-top: 4px; text-align: center;">
+              Target: {{ paintTool | titlecase }} ({{ paintTool === 'brush' ? 'B' : (paintTool === 'bucket' ? 'F' : 'M')
+              }})
+            </div>
+          </div>
+
+          <!-- Brush Options -->
+          <div *ngIf="paintTool === 'brush'" class="control-group">
+            <span class="label">Size:</span>
+            <input type="range" min="0.01" max="1.0" step="0.01" [value]="0.2" (input)="onPaintRadiusChange($event)"
+              style="flex:1;">
+          </div>
+
+          <!-- Bucket Options -->
+          <div *ngIf="paintTool === 'bucket'" class="control-group"
+            style="flex-direction: column; align-items: flex-start;">
+            <div style="display:flex; width:100%; align-items:center; margin-bottom:5px;">
+              <span class="label" style="width:70px;">Tolerance:</span>
+              <input type="range" min="0" max="2.0" step="0.01" value="0.1" (input)="onPaintToleranceChange($event)"
+                style="flex:1;">
+            </div>
+            <div style="font-size:10px; color:#888; margin-bottom: 5px;">
+              Higher tolerance (>1.0) ignores sharp edges.
+            </div>
+            <label style="display:flex; align-items:center; color: #ddd; font-size: 12px; cursor: pointer;">
+              <input type="checkbox" (change)="onFloodModeChange($event)" style="margin-right: 8px;">
+              Loop / Curve Mode (Follow curvature)
+            </label>
+            <div style="font-size:10px; color:#888; margin-top:2px;">
+              Uncheck for flat surfaces. Check to paint around cylinders/curves.
+            </div>
+          </div>
+
+          <div *ngIf="paintTool === 'brush'" class="control-group">
+            <span class="label">Size:</span>
+            <input type="range" min="0.05" max="2.0" step="0.05" (input)="onPaintRadiusChange($event)" value="0.2"
+              style="flex: 1;">
+          </div>
+
+          <div *ngIf="paintTool === 'bucket'" class="control-group">
+            <span class="label">Tolerance:</span>
+            <input type="range" min="0" max="0.5" step="0.01" (input)="onPaintToleranceChange($event)" value="0.1"
+              style="flex: 1;">
+          </div>
+
+          <div class="note" style="margin-top: 20px; font-size: 12px; color: #aaa;">
+            Left Click + Drag to Paint.
+            <br>
+            Right Click + Drag to Rotate Camera (if needed).
+          </div>
+    </div>
+  </div>
+
+  <!-- PALETTE STUDIO PANEL (RIGHT SIDE) -->
+  <div *ngIf="viewMode === 'paint'" class="controls-panel palette-panel"
+    style="position: absolute; right: 20px; top: 20px; left: auto; height: auto; max-height: 90vh; overflow-y: auto;">
+    <h1 style="color: #e74c3c; border-bottom: 2px solid #e74c3c;">Palette Studio</h1>
+
+    <div class="control-group" style="justify-content: center;">
+      <label class="file-upload-btn" style="background: #444; border: 1px solid #666;">
+        Import Reference Image
+        <input type="file" (change)="onPaletteImageUpload($event)" accept="image/*">
+      </label>
+    </div>
+
+    <!-- IMAGE PREVIEW area -->
+    <div *ngIf="paletteImage" class="palette-preview-container"
+      style="margin-top: 10px; position: relative; border: 1px solid #555; border-radius: 4px; overflow: hidden; text-align: center; background: #000;">
+      <img [src]="paletteImage" class="palette-image" [class.picking]="true" (mousemove)="onPaletteImageHover($event)"
+        (mouseleave)="onPaletteImageLeave()" (click)="onPaletteImageClick($event)"
+        style="max-width: 100%; max-height: 200px; display: block; margin: 0 auto; cursor: crosshair;">
+
+      <!-- Hover Color Tooltip -->
+      <div *ngIf="isPickingColor && hoverColor" [style.background]="hoverColor"
+        style="position: absolute; top: 5px; right: 5px; padding: 4px 8px; border-radius: 4px; font-size: 10px; color: white; text-shadow: 1px 1px 1px black; border: 1px solid rgba(255,255,255,0.3); pointer-events: none;">
+        {{ hoverColor }}
+      </div>
+    </div>
+
+    <div *ngIf="!paletteImage"
+      style="text-align: center; color: #666; font-size: 12px; margin: 20px 0; font-style: italic;">
+      Upload an image to extract colors
+    </div>
+
+    <!-- EXTRACTED GRID -->
+    <div *ngIf="extractedColors.length > 0">
+      <div class="section-title">Extracted Palette</div>
+      <div class="palette-grid"
+        style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px;">
+        <div *ngFor="let color of extractedColors" (click)="selectColor(color)" [style.background]="color"
+          class="color-swatch" [title]="color"
+          style="aspect-ratio: 1; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); transition: transform 0.1s;">
+        </div>
+      </div>
+    </div>
+
+  </div>
