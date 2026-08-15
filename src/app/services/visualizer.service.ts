@@ -35,7 +35,8 @@ import {
   SolidParticleSystem,
   PolygonMeshBuilder,
   CSG,
-  DynamicTexture
+  DynamicTexture,
+  NoiseProceduralTexture
 } from '@babylonjs/core';
 import '@babylonjs/loaders/stl';
 import '@babylonjs/loaders/glTF'; // GLB/GLTF Support
@@ -389,6 +390,7 @@ export class VisualizerService {
   private _isRecording: boolean = false;
   private gif: any = null; // Type 'any' because gif.js types might be tricky with import
   private gifFrameInterval: any = null;
+  private isGifRendering = false;
 
   get isRecording(): boolean {
     return this._isRecording;
@@ -622,10 +624,14 @@ export class VisualizerService {
       this.modelHolder = new Mesh("modelHolder", this.scene);
       this.modelHolder.parent = this.turntableRoot;
 
-      // Move all existing model meshes into this holder
-      this.turntableRoot.getChildMeshes().forEach((m: any) => {
-        if (m !== this.turntableVisual && m !== this.modelHolder) {
-          m.setParent(this.modelHolder);
+      // Move only DIRECT children to the holder (Model parts)
+      // Avoid stealing base props which are children of turntableVisual
+      this.turntableRoot.getChildren().forEach((node: any) => {
+        // Skip the Visual and the Holder itself
+        if (node !== this.turntableVisual && node !== this.modelHolder) {
+          // Only move if it's a mesh or transform node we want
+          // If it's a direct child, it's likely a model part
+          node.setParent(this.modelHolder);
         }
       });
     }
@@ -660,6 +666,14 @@ export class VisualizerService {
     if (!this.scene || !this.scene.activeCamera) return false;
     const camera = this.scene.activeCamera as ArcRotateCamera;
     return camera.useAutoRotationBehavior;
+  }
+
+  get isTurntableActive(): boolean {
+    return !!(this.turntableRoot && this.turntableRoot.isEnabled());
+  }
+
+  getTurntableSpeed(): number {
+    return this.turntableSpeed;
   }
 
   getAutoRotationSpeed(): number {
@@ -913,7 +927,7 @@ export class VisualizerService {
       this.gizmoManager = new GizmoManager(this.scene);
       this.gizmoManager.positionGizmoEnabled = true;
       this.gizmoManager.rotationGizmoEnabled = true;
-      this.gizmoManager.scaleGizmoEnabled = true;
+      this.gizmoManager.scaleGizmoEnabled = false;
 
       // Sync on Drag
       // We need to attach this listener once
@@ -948,7 +962,16 @@ export class VisualizerService {
       // Logic for Turntable Mode
       if (this.turntableRoot && this.turntableRoot.isEnabled()) {
         this.ensureModelHolder();
-        this.gizmoManager.attachToMesh(this.modelHolder);
+        // Fix: Attach to child mesh directly (the model) instead of the holder
+        // This prevents moving the turntable if the holder is the parent of the turntable
+        const children = this.modelHolder.getChildMeshes(false, (n: AbstractMesh) => {
+          return n.name !== "turntableVisual" && n.name !== "turntableRoot" && !n.name.startsWith("baseMat_");
+        });
+        if (children.length > 0) {
+          this.gizmoManager.attachToMesh(children[0]);
+        } else {
+          this.gizmoManager.attachToMesh(this.modelHolder);
+        }
       } else {
         // Default behavior: Attach to first loaded model
         // Filter out system meshes
@@ -1298,12 +1321,20 @@ export class VisualizerService {
 
     const startNormal = getFaceNormal(startFaceId);
     const startColor = getFaceColor(startFaceId); // Original color of start face
-    const threshold = 1 - this.paintTolerance;
+
+    // Clamp tolerance to valid range for dot product comparison
+    // When tolerance > 1.0, we essentially ignore geometric checks
+    const ignoreGeometry = this.paintTolerance >= 1.0;
+    const threshold = ignoreGeometry ? -1.0 : (1 - this.paintTolerance);
 
     // Threshold for color difference (to stop at boundaries)
+    // Higher threshold = more permissive (allows more color variation)
     const colorDiff = (c1: any, c2: any) => {
       return Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b);
     };
+
+    // Color tolerance - be permissive for white/uninitialized faces
+    const COLOR_TOLERANCE = 0.3;
 
     // Paint start face immediately
     const paintFace = (fid: number) => {
@@ -1335,8 +1366,8 @@ export class VisualizerService {
         const nNormal = getFaceNormal(nid);
 
         // 1. Color Boundary Check (Stop if hitting already painted area or different color)
-        // If we want to stay within same original color:
-        if (colorDiff(nColor, startColor) > 0.1) {
+        // Use COLOR_TOLERANCE to be more permissive with white/uninitialized faces
+        if (colorDiff(nColor, startColor) > COLOR_TOLERANCE) {
           continue;
         }
 
@@ -1347,37 +1378,6 @@ export class VisualizerService {
           dot = nNormal.x * startNormal.x + nNormal.y * startNormal.y + nNormal.z * startNormal.z;
         } else {
           // Smooth/Loop Mode: Compare with Current Normal (follows curve)
-          dot = nNormal.x * currentNormal.x + nNormal.y * currentNormal.y + nNormal.z * currentNormal.z;
-        }
-
-        if (dot >= threshold) {
-          visited.add(nid);
-          paintFace(nid);
-          queue.push(nid);
-        }
-      }
-
-      for (const nid of neighbors) {
-        if (visited.has(nid)) continue;
-
-        const nNormal = getFaceNormal(nid);
-        const nColor = getFaceColor(nid);
-
-        // 1. Color Check: Must match original underlying color (stop at pre-painted lines)
-        // We compare neighbor's current color with startColor. 
-        // If neighbor is ALREADY painted different color (by user brush), stop.
-        if (colorDiff(nColor, startColor) > 0.1) {
-          continue; // Hit a boundary
-        }
-
-        // 2. Geometric Check
-        let dot = 0;
-        if (this.floodMode === 'flat') {
-          // Compare with Start Normal
-          dot = nNormal.x * startNormal.x + nNormal.y * startNormal.y + nNormal.z * startNormal.z;
-        } else {
-          // Smooth/Loop Mode: Compare with Neighbor (or Current) to follow curve
-          // Comparing with Current is better for chaining.
           dot = nNormal.x * currentNormal.x + nNormal.y * currentNormal.y + nNormal.z * currentNormal.z;
         }
 
@@ -1476,48 +1476,61 @@ export class VisualizerService {
   // --- MINIATURE BASE GENERATOR ---
   private baseProps: Mesh[] = [];
 
-  setTurntableBaseStyle(style: 'plastic' | 'concrete' | 'obsidian' | 'grid' | 'fabric' | 'terrain'): void {
+  private currentBaseParticles: Nullable<ParticleSystem> = null;
+
+  setTurntableBaseStyle(style: 'plastic' | 'concrete' | 'obsidian' | 'grid' | 'fabric' | 'terrain' | 'lava'): void {
     if (!this.turntableVisual || !this.scene) return;
 
-    // 1. Clean up existing props
+    // 1. Clean up existing props & particles
     this.baseProps.forEach(m => m.dispose());
     this.baseProps = [];
+
+    if (this.currentBaseParticles) {
+      this.currentBaseParticles.stop();
+      this.currentBaseParticles.dispose();
+      this.currentBaseParticles = null;
+    }
+
+    // Reset visibility (Terrain/Lava modes hide it)
+    this.turntableVisual.isVisible = true;
 
     // 2. Base Material Setup
     const mat = new PBRMaterial("baseStyleMat", this.scene);
 
-    // Default PBR
-    mat.metallic = 0.0;
-    mat.roughness = 0.5;
-    mat.albedoColor = Color3.FromHexString("#222222");
+    // Common Noise for generic bump
+    const baseNoise = new NoiseProceduralTexture("baseNoise", 256, this.scene);
 
     if (style === 'plastic') {
       mat.metallic = 0.1;
       mat.roughness = 0.3;
       mat.albedoColor = Color3.FromHexString("#111111");
+      baseNoise.octaves = 8;
+      baseNoise.persistence = 1.5;
+      mat.bumpTexture = baseNoise;
+      mat.bumpTexture.level = 0.2; // Fine bump
     }
     else if (style === 'obsidian') {
       mat.metallic = 0.0;
       mat.roughness = 0.05; // Very shiny
       mat.albedoColor = Color3.Black();
+      baseNoise.octaves = 4;
+      mat.albedoTexture = baseNoise; // Slight marble variation
+      mat.albedoTexture.level = 0.2;
     }
     else if (style === 'concrete') {
       mat.metallic = 0.0;
       mat.roughness = 0.9;
       mat.albedoColor = Color3.FromHexString("#555555");
-
-      // Procedural Noise using DynamicTexture implies dependencies
-      // Let's use simple high roughness for now to ensure reliability
-      // or try to use a standard noise logic if allowed.
-      // I'll stick to color tuning for now to ensure it applies safely.
-      mat.albedoColor = Color3.FromHexString("#444444");
+      baseNoise.octaves = 6;
+      baseNoise.persistence = 0.8;
+      mat.bumpTexture = baseNoise;
+      mat.bumpTexture.level = 1.0; // Rough bump
     }
     else if (style === 'grid') {
       mat.metallic = 0.8;
       mat.roughness = 0.2;
       mat.albedoColor = Color3.Black();
 
-      // Create Grid Texture
       const dt = new DynamicTexture("gridTex", 512, this.scene);
       const ctx = dt.getContext();
       ctx.fillStyle = "black";
@@ -1527,13 +1540,11 @@ export class VisualizerService {
       ctx.lineWidth = 4;
       ctx.beginPath();
 
-      // Draw Grid
       const step = 64;
       for (let i = 0; i <= 512; i += step) {
         ctx.moveTo(i, 0); ctx.lineTo(i, 512);
         ctx.moveTo(0, i); ctx.lineTo(512, i);
       }
-      // Draw Circle
       ctx.moveTo(512, 256);
       ctx.arc(256, 256, 240, 0, Math.PI * 2);
       ctx.stroke();
@@ -1552,77 +1563,329 @@ export class VisualizerService {
       mat.sheen.albedoScaling = true;
     }
     else if (style === 'terrain') {
-      mat.albedoColor = new Color3(0.15, 0.1, 0.05);
-      mat.roughness = 1.0;
-      mat.metallic = 0.0;
+      this.turntableVisual.isVisible = false;
       this.generateTerrainFeatures();
     }
+    else if (style === 'lava') {
+      this.turntableVisual.isVisible = false;
+      this.createLavaBase();
+    }
 
-    this.turntableVisual.material = mat;
+    if (style !== 'terrain' && style !== 'lava') {
+      this.turntableVisual.material = mat;
+    }
+
+    // 3. Create Particles
+    this.createBaseParticles(style);
   }
 
+  private createBaseParticles(style: string) {
+    if (!this.turntableRoot) return;
+    const ps = new ParticleSystem("baseParticles", 1000, this.scene);
+    ps.particleTexture = new Texture("https://www.babylonjs-playground.com/textures/flare.png", this.scene);
+    ps.emitter = this.turntableRoot;
 
+    const radius = 0.5;
+    ps.createCylinderEmitter(radius, 0.1, 0, 0);
+
+    ps.minSize = 0.01; ps.maxSize = 0.03;
+    ps.minLifeTime = 1.0; ps.maxLifeTime = 2.0;
+
+    if (style === 'obsidian') {
+      ps.color1 = new Color4(0.5, 0, 1, 1);
+      ps.color2 = new Color4(0, 0, 0, 1);
+      ps.colorDead = new Color4(0, 0, 0, 0);
+      ps.emitRate = 20;
+      ps.gravity = new Vector3(0, 0.1, 0);
+    }
+    else if (style === 'concrete') {
+      ps.color1 = new Color4(0.5, 0.5, 0.5, 0.5);
+      ps.colorDead = new Color4(0.5, 0.5, 0.5, 0);
+      ps.emitRate = 10;
+      ps.minSize = 0.05; ps.maxSize = 0.1;
+    }
+    else if (style === 'grid') {
+      ps.color1 = new Color4(0, 1, 0.8, 1);
+      ps.colorDead = new Color4(0, 0.5, 0.4, 0);
+      ps.emitRate = 30;
+      ps.gravity = new Vector3(0, 0.5, 0);
+    }
+    else if (style === 'fabric') {
+      ps.color1 = new Color4(1, 1, 1, 0.5);
+      ps.colorDead = new Color4(1, 1, 1, 0);
+      ps.emitRate = 5;
+      ps.gravity = new Vector3(0, 0.02, 0);
+    }
+    else if (style === 'terrain') {
+      ps.color1 = new Color4(0.2, 1, 0.2, 1);
+      ps.colorDead = new Color4(0, 0.5, 0, 0);
+      ps.emitRate = 10;
+      ps.gravity = new Vector3(0, 0.05, 0);
+    }
+    else if (style === 'lava') {
+      ps.color1 = new Color4(1, 0.5, 0, 1);
+      ps.color2 = new Color4(1, 0, 0, 1);
+      ps.colorDead = new Color4(0.2, 0.2, 0.2, 0);
+      ps.emitRate = 50;
+      ps.minSize = 0.05; ps.maxSize = 0.15;
+      ps.gravity = new Vector3(0, 0.5, 0);
+    } else {
+      return;
+    }
+
+    ps.start();
+    this.currentBaseParticles = ps;
+  }
+
+  private createLavaBase() {
+    if (!this.turntableVisual) return;
+
+    // Fix: Use diameter 1 because parent is already scaled!
+    const magma = MeshBuilder.CreateCylinder("magmaBase", { diameter: 1, height: 0.5, tessellation: 64 }, this.scene);
+    magma.position = Vector3.Zero();
+    magma.parent = this.turntableVisual;
+
+    const magmaMat = new PBRMaterial("magmaMat", this.scene);
+    magmaMat.roughness = 0.4;
+
+    const magmaNoise = new NoiseProceduralTexture("magmaNoise", 512, this.scene);
+    magmaNoise.octaves = 8; // More detail
+    magmaNoise.persistence = 1.0; // Higher contrast
+    magmaNoise.animationSpeedFactor = 0.5; // Faster flow
+
+    magmaMat.emissiveTexture = magmaNoise;
+    magmaMat.emissiveColor = new Color3(1, 0.3, 0); // Deep Orange
+    magmaMat.albedoColor = Color3.FromHexString("#050505"); // Almost Black cooling crust
+
+    magma.material = magmaMat;
+    this.baseProps.push(magma);
+
+    // 2. Lava Rocks (Sharp & Jagged)
+    for (let k = 0; k < 5; k++) {
+      // Use low-poly sphere for jagged look (Tetrahedron-ish)
+      const rock = MeshBuilder.CreateSphere("lavaRock" + k, { diameter: 1, segments: 1 }, this.scene);
+      // Actually segments: 2 makes a polyhedron-like shape (Tetrahedron-ish)
+
+      const rPos = rock.getVerticesData(VertexBuffer.PositionKind);
+      if (rPos) {
+        for (let i = 0; i < rPos.length; i += 3) {
+          // Spiky deformation
+          const r = 1.0 + (Math.random() * 0.8 - 0.2);
+          rPos[i] *= r; rPos[i + 1] *= r; rPos[i + 2] *= r;
+        }
+        rock.updateVerticesData(VertexBuffer.PositionKind, rPos);
+        rock.createNormals(true);
+      }
+
+      // Random Position
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * 0.35; // Stay within radius (0.5)
+      rock.position = new Vector3(Math.cos(angle) * dist, 0.25, Math.sin(angle) * dist);
+
+      // Flatten bottom, spikey top
+      rock.scaling = new Vector3(0.15, 0.2, 0.15);
+      rock.rotation = new Vector3(Math.random(), Math.random(), Math.random());
+
+      rock.parent = this.turntableVisual;
+
+      const rockMat = new PBRMaterial("lavaRockMat", this.scene);
+      rockMat.albedoColor = new Color3(0.05, 0.05, 0.05); // Charcoal
+      rockMat.roughness = 0.8;
+      // Glowing veins
+      rockMat.emissiveColor = new Color3(0.8, 0.2, 0);
+      rockMat.emissiveTexture = magmaNoise;
+      rockMat.emissiveIntensity = 0.5;
+
+      rock.material = rockMat;
+      this.baseProps.push(rock);
+    }
+  }
 
   private generateTerrainFeatures() {
     if (!this.turntableVisual) return;
 
-    // 1. High-Fidelity Ground (Simple Noise)
-    const diameter = this.turntableVisual.scaling.x;
-    // Note: If using CreateGroundFromHeightMap is too complex with dependencies, we stick to VertexData update
-    const ground = MeshBuilder.CreateGround("terrainGround", { width: diameter, height: diameter, subdivisions: 64 }, this.scene);
-    ground.position.y = 0.25 + 0.01;
-    ground.parent = this.turntableVisual;
+    // --- 1. The RIM (Plastic Base) ---
+    // Standard bevelled base: wider at bottom
+    const baseHeight = 0.25;
+    const baseDiameterTop = 1.0;
+    const baseDiameterBottom = 1.1;
 
-    const positions = ground.getVerticesData(VertexBuffer.PositionKind);
-    if (positions) {
-      for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i];
-        const z = positions[i + 2];
-        const dist = Math.sqrt(x * x + z * z);
-        if (dist > diameter / 2) {
-          positions[i + 1] = -1.0; // Clip
-        } else {
-          // Noise
-          const h = Math.sin(x * 5) * 0.02 + Math.cos(z * 4) * 0.02 + Math.sin(x * 15 + z * 10) * 0.01;
-          const edgeFactor = 1.0 - Math.pow(dist / (diameter / 2), 6);
-          positions[i + 1] = h * edgeFactor;
+    const rim = MeshBuilder.CreateCylinder("baseRim", {
+      height: baseHeight,
+      diameterTop: baseDiameterTop,
+      diameterBottom: baseDiameterBottom,
+      tessellation: 64
+    }, this.scene);
+
+    // Position so bottom is at 0 (approx, parent is at 0)
+    rim.position = new Vector3(0, baseHeight / 2, 0);
+    rim.parent = this.turntableVisual;
+
+    // Simple Black Material for Rim
+    const rimMat = new PBRMaterial("rimMat", this.scene);
+    rimMat.albedoColor = Color3.Black();
+    rimMat.roughness = 0.6; // Satin plastic
+    rimMat.metallic = 0.0;
+    rim.material = rimMat;
+
+
+    // --- 2. The TERRAIN (Ground Top) ---
+    // A slightly smaller cylinder/disc that sits inside the rim's lip
+    const terrainHeight = 0.15;
+    const terrainDiameter = 0.95; // Slightly inset
+
+    const terrain = MeshBuilder.CreateCylinder("terrainTop", {
+      diameter: terrainDiameter,
+      height: terrainHeight,
+      tessellation: 64,
+      subdivisions: 6 // More subdivs for noise details
+    }, this.scene);
+
+    // Sit on top of the rim
+    terrain.position = new Vector3(0, baseHeight, 0);
+    terrain.parent = this.turntableVisual;
+
+    // Displace Vertices (Lumpy Ground)
+    const tPositions = terrain.getVerticesData(VertexBuffer.PositionKind);
+    if (tPositions) {
+      for (let i = 0; i < tPositions.length; i += 3) {
+        const y = tPositions[i + 1];
+        if (y > 0) { // Only affect the top surface
+          const x = tPositions[i];
+          const z = tPositions[i + 2];
+          // Mix low freq and high freq noise
+          const noise = Math.sin(x * 8) * 0.03 + Math.cos(z * 10) * 0.03 + (Math.random() * 0.02);
+          tPositions[i + 1] = y + noise;
         }
       }
-      ground.updateVerticesData(VertexBuffer.PositionKind, positions);
-      ground.createNormals(true);
+      terrain.updateVerticesData(VertexBuffer.PositionKind, tPositions);
+      terrain.createNormals(true);
     }
 
     const terrainMat = new PBRMaterial("terrainMat", this.scene);
-    terrainMat.albedoColor = new Color3(0.2, 0.15, 0.1);
-    terrainMat.roughness = 1.0;
-    ground.material = terrainMat;
-    this.baseProps.push(ground);
+    // Dark Muddy Brown base
+    // Vibrant Green Base for Nature
+    terrainMat.albedoColor = new Color3(0.18, 0.49, 0.2); // Vibrant Green (Approx #2E7D32)
+    terrainMat.roughness = 0.9;
+    terrainMat.metallic = 0.0;
 
-    // 2. High Poly Rock
-    const rock = MeshBuilder.CreateSphere("highPolyRock", { diameter: 0.2, segments: 16 }, this.scene);
-    rock.scaling = new Vector3(1, 0.6, 1.2); // Flattened sphere = smooth rock
-    rock.position = new Vector3(0.2, 0.25 + 0.05, 0.1);
-    rock.parent = this.turntableVisual;
+    // Complex Noise for texture
+    const terrainNoise = new NoiseProceduralTexture("terrainNoise", 512, this.scene);
+    terrainNoise.octaves = 6;
+    terrainNoise.persistence = 1.0;
 
-    const rockMat = new PBRMaterial("rockMat", this.scene);
-    rockMat.albedoColor = new Color3(0.4, 0.4, 0.45);
-    rockMat.roughness = 0.8;
-    rockMat.metallic = 0.0;
-    rock.material = rockMat;
-    this.baseProps.push(rock);
+    // Use noise for bump
+    terrainMat.bumpTexture = terrainNoise;
+    terrainMat.bumpTexture.level = 1.0; // Reduced bump
 
-    // 3. High Poly Log
-    const log = MeshBuilder.CreateCylinder("highPolyLog", { diameter: 0.1, height: 0.5, tessellation: 24 }, this.scene);
-    log.rotation = new Vector3(Math.PI / 2, 0, Math.PI / 5);
-    log.position = new Vector3(-0.15, 0.25 + 0.05, -0.15);
-    log.parent = this.turntableVisual;
+    // Use noise for subtle variation, not complete muddy override
+    terrainMat.albedoTexture = terrainNoise;
+    // terrainMat.albedoColor = new Color3(0.45, 0.5, 0.4); // Removed to use vibrant green set above
 
-    const logMat = new PBRMaterial("logMat", this.scene);
-    logMat.albedoColor = new Color3(0.3, 0.2, 0.1);
-    logMat.roughness = 0.9;
-    log.material = logMat;
-    this.baseProps.push(log);
+    terrain.material = terrainMat;
+    this.baseProps.push(terrain); // Track for cleanup
+    this.baseProps.push(rim);
+
+
+    // --- 3. PROPS (Rocks/Grass) ---
+    // Place them relative to the terrain mesh surface
+    for (let j = 0; j < 5; j++) {
+      const rock = MeshBuilder.CreateSphere("mossRock" + j, { diameter: 1, segments: 1 }, this.scene); // Low poly
+
+      const rPositions = rock.getVerticesData(VertexBuffer.PositionKind);
+      if (rPositions) {
+        for (let i = 0; i < rPositions.length; i += 3) {
+          const r = 1.0 + (Math.random() * 0.4 - 0.2);
+          rPositions[i] *= r; rPositions[i + 1] *= r; rPositions[i + 2] *= r;
+        }
+        rock.updateVerticesData(VertexBuffer.PositionKind, rPositions);
+        rock.createNormals(true);
+        rock.convertToFlatShadedMesh();
+      }
+
+      const scale = 0.08 + Math.random() * 0.12;
+      rock.scaling = new Vector3(scale, scale * 0.7, scale);
+
+      // Random position on the terrain disc
+      const angle = Math.random() * Math.PI * 2;
+      // Keep within terrain diameter (approx 0.4 radius safe zone)
+      const dist = Math.random() * 0.35;
+
+      const px = Math.cos(angle) * dist;
+      const pz = Math.sin(angle) * dist;
+
+      // Height should be: Rim Height + Terrain Height/2 + Rock Height/2
+      // Easier to just parent to terrain? No, current parent is turntableVisual.
+      // Let's parent to terrain to move with it? 
+      // Actually keeping parent=turntableVisual is fine if we calculate Y correctly.
+      // Base Top is at Y approx 0.25 (rim height).
+      // Rock Y = 0.25 + noise...
+      const py = baseHeight + 0.02;
+
+      rock.position = new Vector3(px, py, pz);
+      rock.rotation = new Vector3(Math.random(), Math.random(), Math.random());
+      rock.parent = this.turntableVisual;
+
+      const rockMat = new PBRMaterial("mossRockMat" + j, this.scene);
+      rockMat.albedoColor = new Color3(0.35, 0.35, 0.35); // Grey
+      rockMat.roughness = 0.9;
+
+      const mossNoise = new NoiseProceduralTexture("mossNoise" + j, 256, this.scene);
+      rockMat.albedoTexture = mossNoise;
+      rockMat.albedoColor = new Color3(0.4, 0.5, 0.4); // Greenish
+
+      rock.material = rockMat;
+      this.baseProps.push(rock);
+    }
+
+    // --- 3. Grass / Weeds (Procedural Clumps) ---
+    // Create a simple grass blade mesh to clone? or just build them.
+    // Let's build 30 clumps.
+    const grassMat = new PBRMaterial("grassMat", this.scene);
+    grassMat.albedoColor = new Color3(0.2, 0.6, 0.1); // Bright Green
+    grassMat.roughness = 1.0;
+    grassMat.backFaceCulling = false; // Double sided
+
+    for (let g = 0; g < 40; g++) {
+      // Simple blade cluster
+      const blade = MeshBuilder.CreatePlane("grass" + g, { height: 1, width: 1 }, this.scene);
+
+      // Randomize
+      const h = 0.1 + Math.random() * 0.15; // Tallness
+      const w = 0.05 + Math.random() * 0.05; // Width
+      blade.scaling = new Vector3(w, h, 1);
+
+      // Position
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.4; // Radius
+      const posX = Math.cos(angle) * r;
+      const posZ = Math.sin(angle) * r;
+      const posY = 0.25 + (h / 2) - 0.02; // Slightly sunk
+
+      // "Star" pattern tuft (3 blades)
+      const bladeCount = 3;
+      for (let k = 0; k < bladeCount; k++) {
+        const subBlade = (k === 0) ? blade : blade.clone("grass_" + g + "_" + k);
+        if (k === 0) {
+          subBlade.position = new Vector3(posX, posY, posZ);
+          subBlade.rotation = new Vector3(0, Math.random() * Math.PI * 2, 0); // Random base rotation
+        } else {
+          subBlade.parent = blade; // relative to first blade? No, better absolute for simplicity here
+          subBlade.position = new Vector3(posX, posY, posZ);
+          // Rotate 60 degrees from base
+          subBlade.rotation = new Vector3(0, blade.rotation.y + (k * Math.PI / 3), 0);
+        }
+
+        subBlade.parent = this.turntableVisual;
+        subBlade.material = grassMat;
+        this.baseProps.push(subBlade);
+      }
+    }
   }
+
+
+
+
 
   toggleTurntable(enabled: boolean): void {
     if (!this.scene) return;
@@ -1975,13 +2238,14 @@ export class VisualizerService {
 
     // Initialize GIF encoder
     this.gif = new GIF({
-      workers: 2,
-      quality: 1, // High Quality
+      workers: 4, // Increase workers for speed
+      quality: 10, // Lower quality index (10 is standard good/fast, 1 is best/slow)
       width: width,
       height: finalHeight,
       workerScript: 'assets/gif.worker.js',
       dither: false // Dithering creates noise for 3D
     });
+    this.isGifRendering = false;
 
     const totalFrames = Math.round(fps * durationSec);
     const intervalMs = 1000 / fps;
@@ -1996,15 +2260,26 @@ export class VisualizerService {
     const camera = this.scene.activeCamera as ArcRotateCamera;
     const wasAutoRotating = camera.useAutoRotationBehavior;
 
-    if (seamlessLoop && camera) {
+    if (seamlessLoop && camera && wasAutoRotating) {
       initialAlpha = camera.alpha;
       initialInertia = camera.inertia;
       // Disable auto-rotation so we can drive it manually
       camera.useAutoRotationBehavior = false;
       // Disable inertia for precise frame stepping
       camera.inertia = 0;
+      // Disable inertia for precise frame stepping
+      camera.inertia = 0;
     }
-    // ---------------------------
+
+    // --- Turntable Seamless Loop ---
+    let initialTurntableRotation = 0;
+    const wasTurntablePaused = this.isTurntablePaused;
+
+    if (seamlessLoop && this.isTurntableActive) {
+      initialTurntableRotation = this.turntableRoot.rotation.y;
+      this.setTurntablePaused(true); // Pause native loop to control manually
+    }
+    // -------------------------------
 
     let frameCount = 0;
 
@@ -2014,18 +2289,26 @@ export class VisualizerService {
         clearInterval(this.gifFrameInterval);
 
         // --- Restore State ---
-        if (seamlessLoop && camera) {
+        if (seamlessLoop && camera && wasAutoRotating) {
           if (wasAutoRotating) camera.useAutoRotationBehavior = true;
           camera.inertia = initialInertia;
         }
+
+        if (seamlessLoop && this.isTurntableActive) {
+          this.setTurntablePaused(wasTurntablePaused); // Restore state
+        }
         // ---------------------
 
-        this.gif.render();
+        if (!this.isGifRendering) {
+          this.isGifRendering = true;
+          this.gif.render();
+        }
         return;
       }
 
       // --- Manual Seamless Rotation ---
-      if (seamlessLoop && camera) {
+      // Only rotate camera if it was auto-rotating before
+      if (seamlessLoop && camera && wasAutoRotating) {
         // Precise rotation: 0 to 360 over the duration
         // We use frameCount / totalFrames. 
         // Note: To be perfectly seamless, frame 0 is 0deg, and the frame AFTER the last one would be 360deg (which is 0deg).
@@ -2034,6 +2317,13 @@ export class VisualizerService {
         // Ideally, frame 0 = 0deg. Frame [total] = 360deg. We record [0..total-1].
         const angleOffset = (frameCount / totalFrames) * 2 * Math.PI;
         camera.alpha = initialAlpha + angleOffset;
+      }
+
+      // --- Manual Seamless Turntable Rotation ---
+      if (seamlessLoop && this.isTurntableActive) {
+        // Full 360 rotation (2PI) over duration
+        const angleOffset = (frameCount / totalFrames) * 2 * Math.PI;
+        this.turntableRoot.rotation.y = initialTurntableRotation + angleOffset;
       }
       // --------------------------------
 
@@ -2249,7 +2539,10 @@ export class VisualizerService {
       clearInterval(this.gifFrameInterval);
       this.gifFrameInterval = null;
       console.log("Rendering GIF...");
-      this.gif.render();
+      if (!this.isGifRendering) {
+        this.isGifRendering = true;
+        this.gif.render();
+      }
       // _isRecording stays true until render finished
     } else {
       // Fallback if not gif

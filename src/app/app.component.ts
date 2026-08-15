@@ -146,7 +146,8 @@ export class AppComponent implements AfterViewInit {
   }
 
   onTurntableMaterialChange(event: any) {
-    this.visualizerService.setTurntableBaseStyle(event.target.value);
+    console.log("Setting base style:", event.target.value);
+    this.visualizerService.setTurntableBaseStyle(event.target.value as any);
   }
 
   onGizmosToggle(event: any) {
@@ -248,10 +249,13 @@ export class AppComponent implements AfterViewInit {
   }
 
   recordFormat: 'webm' | 'gif' = 'webm';
-  gifFps: number = 15;
-  gifWidth: number = 500;
+  gifFps: number = 12; // Reduced for performance
+  gifWidth: number = 360; // Reduced for performance
   showGuide: boolean = false;
   aspectRatio: '16:9' | '9:16' | '1:1' = '16:9';
+  recordingMode: 'auto' | 'manual' = 'auto';
+  manualDuration: number = 3;
+  manualSeamless: boolean = false;
 
   onToggleRecord() {
     if (this.isRecording) {
@@ -285,13 +289,42 @@ export class AppComponent implements AfterViewInit {
         let duration = 3;
         let seamless = false;
 
-        if (this.visualizerService.isAutoRotating) {
-          // Seamless Loop Calculation: Duration = 2 * PI / Speed (radians/sec)
-          const speed = this.visualizerService.getAutoRotationSpeed();
-          if (speed > 0) {
-            duration = (2 * Math.PI) / speed;
-            seamless = true;
-            console.log(`Auto-Rotation active. Speed: ${speed}, Calculated Seamless Duration: ${duration}s, Seamless Mode: ON`);
+        if (this.recordingMode === 'manual') {
+          duration = this.manualDuration;
+          seamless = this.manualSeamless;
+        } else {
+          // AUTO MODE logic
+          if (this.visualizerService.isAutoRotating) {
+            // Seamless Loop Calculation: Duration = 2 * PI / Speed (radians/sec)
+            const speed = this.visualizerService.getAutoRotationSpeed();
+            if (speed > 0) {
+              duration = (2 * Math.PI) / speed;
+              seamless = true;
+              console.log(`Auto-Rotation active. Speed: ${speed}, Calculated Seamless Duration: ${duration}s, Seamless Mode: ON`);
+            }
+          } else if (this.visualizerService.isTurntableActive) {
+            // Seamless Loop Calculation for Turntable
+            // Speed in service is rotation step per frame
+            // To maintain the apparent speed in a fixed duration seamless loop:
+            // We target a duration that results in the same angular velocity.
+            // Angular Velocity (w) = SpeedPerFrame * 60 (assuming 60fps base)
+            // Duration = 2PI / w = 2PI / (SpeedPerFrame * 60)
+
+            const speedPerFrame = this.visualizerService.getTurntableSpeed();
+            if (speedPerFrame > 0) {
+              const speedPerSec = speedPerFrame * 60;
+              duration = (2 * Math.PI) / speedPerSec;
+
+              // Cap duration to avoid massive files (speed up spin artificially)
+              const MAX_DURATION = 6;
+              if (duration > MAX_DURATION) {
+                console.warn(`Duration ${duration}s too long. Capping at ${MAX_DURATION}s.`);
+                duration = MAX_DURATION;
+              }
+
+              seamless = true;
+              console.log(`Turntable active. Speed/Frame: ${speedPerFrame}, Approx Speed/Sec: ${speedPerSec}, Calculated Seamless Duration: ${duration}s`);
+            }
           }
         }
         this.visualizerService.startGifRecording(this.gifFps, duration, this.gifWidth, this.activeOverlays, "stl_animation.gif", this.camFilter, crop, seamless);
